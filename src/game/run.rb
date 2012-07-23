@@ -57,13 +57,13 @@ def render_tiles_picker(scale)
   hex = make_hex_path(1.0)
   rows = (0..6).to_a.zip([4,5,6,7,6,5,4]).map {|r, c| [r]*c}.flatten
   cols = [0..3, 0..4, 0..5, 0..6, 1..6, 2..6, 3..6].map {|x| x.to_a}.flatten
-  
+
   w, h = HR3 * 12 * scale, 9 * scale
   img = BufferedImage.new(w, h, BufferedImage::TYPE_BYTE_GRAY)
   gfx = img.createGraphics
   gfx.setPaint(Color.new(0xff, 0xff, 0xff))
   gfx.fillRect(0, 0, img.getWidth, img.getHeight)
-  
+
   colors = [Color::BLACK] + [Color::BLUE, Color::RED]*17 + [Color::BLUE, Color::BLACK]
   colors = [Color::BLUE, Color::GREEN, Color::BLACK, Color::RED, Color::ORANGE, Color::MAGENTA]*6 + [Color::BLUE]
   rows.zip(cols, colors).each do |row, col, color|
@@ -78,7 +78,7 @@ def render_tiles_picker(scale)
     gfx.setPaint(Color.new(val, val, val))
     gfx.fill(hex)
   end
-  
+
   img
 end
 
@@ -92,7 +92,7 @@ class BoardViewImgs
   attr_reader :window_width, :window_height
   attr_reader :width, :height, :xoff, :yoff, :scale
   attr_reader :board, :tiles_buffer
-  
+
   def initialize(window_width, window_height, board)
     @window_width = window_width
     @window_height = window_height
@@ -104,14 +104,14 @@ class BoardViewImgs
     @height = scale * UNITS_H
     @xoff = (window_width - width) / 2
     @yoff = (window_height - height) / 2
-    
+
     render_tiles_buffer
   end
-  
+
   def draw_centered(gfx, img, x, y)
     gfx.drawImage(img, x - (img.getWidth / 2.0), y - (img.getHeight / 2.0), nil)
   end
-  
+
   def render_tile_types()
     path1 = make_hex_path(scale * 0.97)
     path2 = make_hex_path(scale * 0.87)
@@ -135,20 +135,20 @@ class BoardViewImgs
       end
     ]
   end
-  
+
   def render_tiles_buffer()
     tile_imgs = render_tile_types()
-    
+
     @tiles_buffer = BufferedImage.new(width, height, BufferedImage::TYPE_4BYTE_ABGR)
     gfx = tiles_buffer.createGraphics
     gfx.setRenderingHint(RHint::KEY_ANTIALIASING, RHint::VALUE_ANTIALIAS_ON)
-    
+
     board.tiles.each do |tile|
       x, y = tile_coords_to_point(tile.row, tile.col)
       draw_centered(gfx, tile_imgs[tile.type], x, y)
     end
   end
-  
+
   def point_to_tile_coords(x, y)
     i, yrem = y.divmod(Y_UNIT * scale)
     j, xrem = x.divmod(X_UNIT * scale)
@@ -169,7 +169,7 @@ class BoardViewImgs
     col = (j - 2 + row) / 2
     [row, col, ascending, above]
   end
-  
+
   def tile_coords_to_point(row, col)
     [((2 * col - row + 3) * X_UNIT * scale).to_i,
      ((3 * row) * Y_UNIT * scale).to_i]
@@ -178,59 +178,59 @@ end
 
 class BoardView < javax.swing.JPanel
   attr_reader :imgs, :board
-  
+
   class MouseListener < java.awt.event.MouseAdapter
     def mouseClicked(evt)
       results = evt.source.point_to_tile_coords(evt.getX, evt.getY)
       puts "#{results.inspect}"
     end
-    
+
     def mouseMoved(evt)
       imgs = evt.source.imgs
       row, col = imgs.point_to_tile_coords(evt.getX - imgs.xoff, evt.getY - imgs.yoff)
       evt.source.highlight = [row, col]
     end
   end
-  
+
   class ComponentListener < java.awt.event.ComponentAdapter
     def componentResized(evt)
       evt.source.update_size
     end
   end
-  
+
   def initialize()#(board)
     super
     #@board = board
     @highlight = nil
     @imgs = BoardViewImgs.new(600, 500, $b)#board)
     setPreferredSize(java.awt.Dimension.new(600, 500))
-    
+
     addMouseListener MouseListener.new
     addMouseMotionListener MouseListener.new
     addComponentListener ComponentListener.new
   end
-  
+
   def point_to_tile_coords(x, y)
     imgs.point_to_tile_coords(x - imgs.xoff, y - imgs.yoff)
   end
-  
+
   def paintComponent(gfx)
     gfx.setPaint(Color::WHITE)#COL_SEA)
     gfx.fill(getBounds())
     gfx.drawImage(@imgs.tiles_buffer, @imgs.xoff, @imgs.yoff, nil)
-    
+
     if not highlight.nil?
       x, y = imgs.tile_coords_to_point(*highlight)
       gfx.setPaint(Color::BLACK)
       gfx.fillOval(x + imgs.xoff - 10, y + imgs.yoff - 10, 20, 20)
     end
   end
-  
+
   def update_size()
     @imgs = BoardViewImgs.new(getWidth, getHeight, $b)
     repaint
   end
-  
+
   def highlight() @highlight end
   def highlight=(coords)
     coords = nil if not $b.tile_map.has_key?(coords)
@@ -244,10 +244,10 @@ end
 class TestFrame < JFrame
   def initialize()
     super("Test Frame")
-    
+
     board_view = BoardView.new#($b)
     add board_view
-    
+
     setDefaultCloseOperation JFrame::EXIT_ON_CLOSE
     pack
     setVisible true

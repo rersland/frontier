@@ -35,7 +35,7 @@ end
 
 module IdObject
   attr_accessor :id
-  
+
   def inspect()
     "#{send(:class)}:#{id}"
   end
