@@ -6,7 +6,7 @@ import java.io.InputStream;
 import java.io.IOException;
 import java.net.URL;
 
-
+import java.util.List;
 import java.util.ArrayList;
 import org.jruby.Ruby;
 import org.jruby.RubyInstanceConfig;
@@ -15,12 +15,14 @@ import org.jruby.javasupport.JavaEmbedUtils;
 public class Main
 {
   public static void main(String[] args) throws Exception
-  {   
+  {
+    System.setProperty("jruby.compat.version", "RUBY1_9");
+
     RubyInstanceConfig config = new RubyInstanceConfig();
     config.setArgv(args);
     Ruby runtime = JavaEmbedUtils.initialize(new ArrayList(0), config);
     String mainRubyFile = "main";
-   
+
     ArrayList<String> config_data = new ArrayList<String>();
     try{
       java.io.InputStream ins = Main.class.getClassLoader().getResourceAsStream("run_configuration");
