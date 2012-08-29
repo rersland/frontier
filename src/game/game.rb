@@ -1,7 +1,7 @@
 class Resource
   attr_accessor :name
   def initialize(*args)
-    name = *args
+    @name = *args
   end
 end
 
@@ -11,25 +11,36 @@ CLAY  = Resource.new "clay"
 ROCK  = Resource.new "rock"
 SHEEP = Resource.new "sheep"
 
-class TileType
-  attr_accessor :name
+class Terrain
+  attr_accessor :name, :text_symbol
   def initialize(*args)
-    name = *args
+    @name, @text_symbol = *args
+  end
+
+  def inspect()
+    name.upcase
   end
 end
 
-FOREST   = TileType.new "forest"
-PLAINS   = TileType.new "plains"
-HILLS    = TileType.new "hills"
-MOUNTAIN = TileType.new "mountain"
-PASTURE  = TileType.new "pasture"
-DESERT   = TileType.new "desert"
-TILE_TYPES = [FOREST, PLAINS, HILLS, MOUNTAIN, PASTURE, DESERT]
+FOREST   = Terrain.new("forest",   "f")
+PLAINS   = Terrain.new("plains",   "p")
+PASTURE  = Terrain.new("pasture",  "a")
+HILLS    = Terrain.new("hills",    "h")
+MOUNTAIN = Terrain.new("mountain", "m")
+DESERT   = Terrain.new("desert",   "d")
+TERRAINS = [FOREST, PLAINS, HILLS, MOUNTAIN, PASTURE, DESERT]
 
 class TileCounter
   attr_accessor :letter, :number
   def initialize(*args)
-    letter, number = *args
+    @letter, @number = *args
+  end
+end
+
+class GamePiece
+  attr_accessor :type, :player
+  def initialize(*args)
+    @type, @player = *args
   end
 end
 

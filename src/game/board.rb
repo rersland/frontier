@@ -38,7 +38,7 @@ def define_nbor_accessors(type, idx_map)
 end
 
 class Tile
-  attr_accessor :row, :col, :type, :counter
+  attr_accessor :row, :col, :terrain, :counter, :robber
 
   define_nbor_accessors(:tile, :w=>0, :nw=>1, :ne=>2, :e=>3, :se=>4, :sw=>5)
   define_nbor_accessors(:vtex, :nw=>0, :n=>1, :ne=>2, :se=>3, :s=>4, :sw=>5)
@@ -49,10 +49,19 @@ class Tile
   def initialize()
     @tiles, @edges, @vtexs = [], [], []
   end
+
+  def dump_to_text()
+    text = ""
+    text += terrain.text_symbol unless terrain.nil?
+    text += counter.number.to_s unless counter.nil?
+    text += "&" if robber
+    text = "*" if text == ""
+    return text
+  end
 end
 
 class Vtex
-  attr_accessor :alignment, :row, :col
+  attr_accessor :alignment, :row, :col, :piece
 
   define_nbor_accessors(:tile, :nw=>0, :n=>0, :ne=>1, :se=>1, :s=>2, :sw=>2)
   define_nbor_accessors(:edge, :nw=>0, :n=>0, :ne=>1, :se=>1, :s=>2, :sw=>2)
@@ -62,10 +71,15 @@ class Vtex
   def initialize()
     @tiles, @edges = [], []
   end
+
+  def dump_to_text()
+    return "*" if piece.nil?
+    return piece.player.to_s[0].upcase + piece.type.to_s[0]
+  end
 end
 
 class Edge
-  attr_accessor :alignment, :row, :col
+  attr_accessor :alignment, :row, :col, :piece
 
   define_nbor_accessors(:tile, :left=>0, :right=>1,
                         :sw=>0, :w=>0, :nw=>0, :ne=>1, :e=>1, :se=>1)
@@ -76,6 +90,11 @@ class Edge
 
   def initialize()
     @tiles, @vtexs = [], []
+  end
+
+  def dump_to_text()
+    return "*" if piece.nil?
+    return piece.player.to_s[0].upcase
   end
 end
 
@@ -123,7 +142,7 @@ class Board
       cols = col_intervals.map {|ival| ival.to_a}.flatten
       count = rows.length
       list = (0...count).to_a.map {|i| cls.new}
-      list.each {|obj| obj.alignment = align} if not align.nil?
+      list.each {|obj| obj.alignment = align} unless align.nil?
       list.zip(rows, cols).each {|obj, row, col| obj.row, obj.col = row, col}
       map = Hash[list.map {|obj| [[obj.row, obj.col], obj]}]
       [list, map]
@@ -158,7 +177,7 @@ class Board
       ].each do |coords, dir1, dir2|
         other = @tile_map[coords]
         tile.set_tile(dir1, other)
-        other.set_tile(dir2, tile) if not other.nil?
+        other.set_tile(dir2, tile) unless other.nil?
       end
 
       # link the tile with its 6 neighboring vertexes
@@ -171,7 +190,7 @@ class Board
       ].each do |coords, dir1, dir2|
         vtex = @vtex_map[coords]
         tile.set_vtex(dir1, vtex)
-        vtex.set_tile(dir2, tile) if not vtex.nil?
+        vtex.set_tile(dir2, tile) unless vtex.nil?
       end
 
       # link the tile with its 6 neighboring edges
@@ -184,7 +203,7 @@ class Board
       ].each do |coords, dir1, dir2|
         edge = @edge_map[coords]
         tile.set_edge(dir1, edge)
-        edge.set_tile(dir2, tile) if not edge.nil?
+        edge.set_tile(dir2, tile) unless edge.nil?
       end
     end
 
@@ -197,7 +216,7 @@ class Board
       ].each do |coords, dir1, dir2|
         edge = @edge_map[coords]
         vtex.set_edge(dir1, edge)
-        edge.set_vtex(dir2, vtex) if not edge.nil?
+        edge.set_vtex(dir2, vtex) unless edge.nil?
       end
     end
 
@@ -210,20 +229,51 @@ class Board
       ].each do |coords, dir1, dir2|
         edge = @edge_map[coords]
         vtex.set_edge(dir1, edge)
-        edge.set_vtex(dir2, vtex) if not edge.nil?
+        edge.set_vtex(dir2, vtex) unless edge.nil?
       end
     end
   end
 
   # randomly distribute the tiles
-  def shuffle_tile_types()
-    types = ([FOREST]*4 + [PLAINS]*4 + [HILLS]*4 + [MOUNTAIN]*3 +
-             [PASTURE]*3 + [DESERT])
-    types.shuffle.zip(tiles).each {|type, tile| tile.type = type}
+  def shuffle_terrains()
+    terrains = ([FOREST]*4 + [PLAINS]*4 + [PASTURE]*4 +
+                [HILLS]*3 + [MOUNTAIN]*3 + [DESERT])
+    terrains.shuffle.zip(tiles).each {|terrain, tile| tile.terrain = terrain}
+  end
+
+  # build a hash of all the tiles, vtexs, and edges, indexed by row and column
+  # numbers suitable for dumping them to human-readable text
+  def _locations_ordered_for_text_dump
+    locations = Hash[(1..23).to_a.map {|row| [row, {}]}]
+    @tiles.each      {|t| locations [t.row * 4    ] [t.col * 4 - t.row * 2 + 5] = t}
+    @up_vtexs.each   {|v| locations [v.row * 4 - 3] [v.col * 4 - v.row * 2 + 5] = v}
+    @down_vtexs.each {|v| locations [v.row * 4 + 3] [v.col * 4 - v.row * 2 + 5] = v}
+    @asc_edges.each  {|e| locations [e.row * 4 - 2] [e.col * 4 - e.row * 2 + 4] = e}
+    @desc_edges.each {|e| locations [e.row * 4 - 2] [e.col * 4 - e.row * 2 + 6] = e}
+    @vert_edges.each {|e| locations [e.row * 4    ] [e.col * 4 - e.row * 2 + 3] = e}
+    return locations
+  end
+
+  def dump_to_text
+    locations = _locations_ordered_for_text_dump()
+    text = ""
+    rownums = locations.keys.sort
+    rownums.each do |rownum|
+      colnums = locations[rownum].keys.sort
+      row = " " * (colnums.last * 3)
+      colnums.each do |colnum|
+        row[colnum * 3] = locations[rownum][colnum].dump_to_text
+      end
+      row.sub!(/\s+$/, '')
+      text += row + "\n"
+    end
+    return text
   end
 end
 
 $b = Board.new
 $b.create_spaces
 $b.connect_spaces
-$b.shuffle_tile_types
+$b.shuffle_terrains
+
+puts $b.dump_to_text
