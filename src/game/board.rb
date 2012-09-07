@@ -1,4 +1,4 @@
-require_relative 'game'
+require_relative '../frontier'
 
 def define_nbor_accessors(type, idx_map)
   idx_map_name = "#{type.to_s.upcase}_IDX_MAP"
@@ -50,13 +50,23 @@ class Tile
     @tiles, @edges, @vtexs = [], [], []
   end
 
-  def dump_to_text()
+  def dump_text()
     text = ""
-    text += terrain.text_symbol unless terrain.nil?
-    text += counter.number.to_s unless counter.nil?
-    text += "&" if robber
+    text += @terrain.text_symbol unless @terrain.nil?
+    text += @counter.number.to_s unless @counter.nil?
+    text += "&" if @robber
     text = "*" if text == ""
     return text
+  end
+
+  def load_text(text)
+    @terrain = ((m = /([fpahmd])/.match(text)) ?
+                {'f'=>FOREST, 'p'=>PLAINS, 'a'=>PASTURE, 'h'=>HILLS, 'm'=>MOUNTAIN, 'd'=>DESERT}[m[1]] :
+                nil)
+    @counter = ((m = /(\d+)/.match(text)) ?
+                TileCounter.new('?', m[1].to_i) :
+                nil)
+    @robber = (text =~ /&/) ? true : false
   end
 end
 
@@ -72,9 +82,16 @@ class Vtex
     @tiles, @edges = [], []
   end
 
-  def dump_to_text()
-    return "*" if piece.nil?
-    return piece.player.to_s[0].upcase + piece.type.to_s[0]
+  def dump_text()
+    return "*" if @piece.nil?
+    return @piece.player.to_s[0].upcase + @piece.type.to_s[0]
+  end
+
+  def load_text(text)
+    @piece = ((m = /([RBWO])([cs])/.match(text)) ?
+             GamePiece.new({'s'=>:settlement, 'c'=>:city}[m[2]],
+                           {'R'=>:red, 'B'=>:blue, 'W'=>:white, 'O'=>:orange}[m[1]]) :
+             nil)
   end
 end
 
@@ -92,9 +109,15 @@ class Edge
     @tiles, @vtexs = [], []
   end
 
-  def dump_to_text()
-    return "*" if piece.nil?
-    return piece.player.to_s[0].upcase
+  def dump_text()
+    return "*" if @piece.nil?
+    return @piece.player.to_s[0].upcase
+  end
+
+  def load_text(text)
+    @piece = ((m = /([RBWO])/.match(text)) ?
+              GamePiece.new(:road, {'R'=>:red, 'B'=>:blue, 'W'=>:white, 'O'=>:orange}[m[1]]) :
+              nil)
   end
 end
 
@@ -254,7 +277,7 @@ class Board
     return locations
   end
 
-  def dump_to_text
+  def dump_text
     locations = _locations_ordered_for_text_dump()
     text = ""
     rownums = locations.keys.sort
@@ -262,18 +285,34 @@ class Board
       colnums = locations[rownum].keys.sort
       row = " " * (colnums.last * 3)
       colnums.each do |colnum|
-        row[colnum * 3] = locations[rownum][colnum].dump_to_text
+        row[colnum * 3] = locations[rownum][colnum].dump_text
       end
       row.sub!(/\s+$/, '')
       text += row + "\n"
     end
     return text
   end
+
+  def load_text(text)
+    locationshash = _locations_ordered_for_text_dump()
+    locations = []
+    locationshash.keys.sort.each do |rownum|
+      locationshash[rownum].keys.sort.each do |colnum|
+        locations.push locationshash[rownum][colnum]
+      end
+    end
+    tokens = text.sub(/^\s+/, '').split(/[\s\.]+/)
+    locations.zip(tokens).each do |location, token|
+      location.load_text(token)
+    end
+  end
 end
 
 $b = Board.new
 $b.create_spaces
 $b.connect_spaces
-$b.shuffle_terrains
+# $b.shuffle_terrains
 
-puts $b.dump_to_text
+$b.load_text(`cat ~/tmp1`)
+
+puts $b.dump_text
