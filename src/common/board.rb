@@ -1,4 +1,4 @@
-require_relative '../frontier'
+require_relative 'frontier'
 
 def define_nbor_accessors(type, idx_map)
   idx_map_name = "#{type.to_s.upcase}_IDX_MAP"

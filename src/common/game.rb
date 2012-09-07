@@ -1,4 +1,4 @@
-require_relative '../frontier'
+require_relative 'frontier'
 
 class Game
   attr_accessor :board, :players

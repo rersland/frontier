@@ -1,4 +1,4 @@
-require_relative '../frontier'
+require_relative 'frontier'
 
 class Player
   attr_accessor :color, :num_roads, :num_settlements, :num_cities, :hand
