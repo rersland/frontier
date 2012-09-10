@@ -308,11 +308,11 @@ class Board
   end
 end
 
-$b = Board.new
-$b.create_spaces
-$b.connect_spaces
+# $b = Board.new
+# $b.create_spaces
+# $b.connect_spaces
 # $b.shuffle_terrains
 
-$b.load_text(`cat ~/tmp1`)
+# # $b.load_text(`cat ~/tmp1`)
 
-puts $b.dump_text
+# puts $b.dump_text
