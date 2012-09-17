@@ -30,8 +30,14 @@ end
 
 class TileCounter
   attr_accessor :letter, :number
+
   def initialize(*args)
     @letter, @number = *args
+  end
+
+  def num_pips()
+    #        number:  2  3  4  5  6    7  8  9 10 11 12
+    return [nil, nil, 1, 2, 3, 4, 5, nil, 5, 4, 3, 2, 1][@number]
   end
 end
 
