@@ -29,7 +29,8 @@ class Event
           sleep 0.1
         else
           name, data = @queue.pop
-          @connections[name].each { |handler| handler.call(name, data) }
+          handlers = @connections[name]
+          handlers.each {|handler| handler.call(name, data)} unless handlers.nil?
         end
       end
     end

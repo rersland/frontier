@@ -11,3 +11,24 @@ class Object
     end
   end
 end
+
+class Vector
+  attr_accessor :x, :y
+  def initialize(x=0, y=0)
+    @x, @y = x, y
+  end
+  def to_s()
+    "<#@x,#@y>";
+  end
+  def +(v)
+    v = Vector.new(*v) if v.is_a? Array
+    return Vector.new(@x + v.x, @y + v.y)
+  end
+  def *(f)
+    return Vector.new(@x * f, @y * f)
+  end
+end
+
+def vec(x, y)
+  return Vector.new(x, y)
+end

@@ -2,7 +2,8 @@ require 'thread'
 
 require_relative '../common/event'
 require_relative '../common/frontier'
-require_relative 'render_paths'
+require_relative '../common/util'
+require_relative 'render_shapes'
 
 include Java
 
@@ -18,11 +19,50 @@ def scale_path(path, scale)
   xform.scale(scale, scale)
   newpath = path.clone
   newpath.transform(xform)
-  newpath
+  return newpath
+end
+
+def scale_shape(shape, scale1, scale2=nil)
+  scale2 ||= scale1
+  orig, path = *shape
+  return [orig * scale1, scale_path(path, scale2)]
 end
 
 def make_circle(r, x=0, y=0)
-  java.awt.geom.Ellipse2D::Double.new(x - r, y - r, r * 2, r * 2)
+  [vec(x, y), java.awt.geom.Ellipse2D::Double.new(-r, -r, r * 2, r * 2)]
+end
+
+def draw_centered_text(gfx, text, font, x, y, center_y = true)
+  glyph_vector = font.createGlyphVector(gfx.getFontRenderContext(), text)
+  #  bounds = glyph_vector.getBounds2D()
+  bounds = glyph_vector.getVisualBounds()
+  gfx.drawGlyphVector(glyph_vector,
+                      (x - bounds.getCenterX()),
+                      (center_y ? (y - bounds.getCenterY()) : y))
+end
+
+def draw_centered_image(gfx, img, x, y)
+  w, h = img.getWidth(), img.getHeight()
+  gfx.drawImage(img, x - w/2, y - h/2, nil)
+end
+
+def tile_coords_to_window(row, col, scale=1.0)
+  [((2 * col - row + 3) * BOARD_UNIT_X * scale).to_i,
+   ((3 * row) * BOARD_UNIT_Y * scale).to_i]
+end
+
+def draw_shape(gfx, shape)
+  o, path = *shape
+  gfx.translate(o.x, o.y)
+  gfx.draw(path)
+  gfx.translate(-o.x, -o.y)
+end
+
+def fill_shape(gfx, shape)
+  o, path = *shape
+  gfx.translate(o.x, o.y)
+  gfx.fill(path)
+  gfx.translate(-o.x, -o.y)
 end
 
 # :.....:.....:.....:.....:.....:.....:.....:.....:.....:.....:.....:.....:
@@ -62,7 +102,7 @@ end
 # :.....:.....:.....:.....X.....:.....X.....:.....X.....:.....:.....:.....:
 # :     :     :     :     :     :     :     :     :     :     :     :     :
 # :.....:.....:.....:.....:.....:.....:.....:.....:.....:.....:.....:.....:
-BOARD_UNIT_X = RenderPaths::HR3
+BOARD_UNIT_X = RenderShapes::HR3
 BOARD_UNIT_Y = 0.5
 BOARD_UNITS_W = BOARD_UNIT_X * 12
 BOARD_UNITS_H = BOARD_UNIT_Y * 18
@@ -83,15 +123,7 @@ DESERT.color   = Color.new( 250, 250, 80  )
 
 COL_CREAM      = Color.new( 230, 220, 150 )
 COL_SEA        = Color.new( 40,  70,  160 )
-
-def draw_centered_text(gfx, text, font, x, y, center_y = true)
-  glyph_vector = font.createGlyphVector(gfx.getFontRenderContext(), text)
-  #  bounds = glyph_vector.getBounds2D()
-  bounds = glyph_vector.getVisualBounds()
-  gfx.drawGlyphVector(glyph_vector,
-                      (x - bounds.getCenterX()),
-                      (center_y ? (y - bounds.getCenterY()) : y))
-end
+COL_HIGHLIGHT  = Color.new( 180, 250, 210 )
 
 ################################################################################
 # RenderJob
@@ -109,56 +141,30 @@ class RenderJob
   def counter_number_font()  Font.new("Serif", Font::BOLD, (@scale * 0.32).to_i)   end
   def counter_letter_font()  Font.new("SansSerif", Font::PLAIN, (@scale * 0.15).to_i)  end
 
-  def window_coords_to_board(x, y)
-    i, yrem = y.divmod(BOARD_UNIT_Y * @scale)
-    j, xrem = x.divmod(BOARD_UNIT_X * @scale)
-    if i % 3 != 1
-      row = (i % 3 == 0) ? (i / 3) : (i / 3) + 1
-      ascending, above = nil, nil
-    else
-      ascending = (i % 6 == 1) ? (j % 2 == 1) : (j % 2 == 0)
-      if ascending
-        above = (BOARD_UNIT_Y * @scale - yrem) / xrem > BOARD_UNIT_Y / BOARD_UNIT_X
-      else
-        above = yrem / xrem < BOARD_UNIT_Y / BOARD_UNIT_X
-      end
-      #above = (ascending ? ((BOARD_UNIT_Y * @scale - yrem) / xrem > BOARD_UNIT_Y / BOARD_UNIT_X)
-      #above = ((ascending ? (BOARD_UNIT_Y * @scale) - yrem : yrem) / xrem) < (BOARD_UNIT_Y / BOARD_UNIT_X)
-      row = above ? (i / 3) : (i / 3) + 1
-    end
-    col = (j - 2 + row) / 2
-    [row, col, ascending, above]
-  end
-
-  def board_coords_to_window(row, col)
-    [((2 * col - row + 3) * BOARD_UNIT_X * @scale).to_i,
-     ((3 * row) * BOARD_UNIT_Y * @scale).to_i]
-  end
-
   def draw_tile(tile, buffer)
-    outer_hex = scale_path(RenderPaths::HEX, @scale * 0.97)
-    inner_hex = scale_path(RenderPaths::HEX, @scale * 0.87)
-    x, y = board_coords_to_window(tile.row, tile.col)
+    outer_hex = scale_shape(RenderShapes::HEX, @scale * 0.97)
+    inner_hex = scale_shape(RenderShapes::HEX, @scale * 0.87)
+    x, y = tile_coords_to_window(tile.row, tile.col, @scale)
     gfx = buffer.createGraphics
     gfx.setRenderingHint(RHint::KEY_ANTIALIASING, RHint::VALUE_ANTIALIAS_ON)
     gfx.translate(x, y)
     gfx.setPaint(COL_CREAM)
-    gfx.fill(outer_hex)
+    fill_shape(gfx, outer_hex)
     gfx.setPaint(tile.terrain.color)
-    gfx.fill(inner_hex)
+    fill_shape(gfx, inner_hex)
     gfx.setPaint(Color::BLACK)
     gfx.setStroke(detail_stroke())
-    gfx.draw(outer_hex)
-    gfx.draw(inner_hex)
+    draw_shape(gfx, outer_hex)
+    draw_shape(gfx, inner_hex)
 
     unless tile.counter.nil?
       # draw the circle
       circle = make_circle(@scale * 0.3)
       gfx.setPaint(COL_CREAM)
-      gfx.fill(circle)
+      fill_shape(gfx, circle)
       gfx.setPaint(Color::BLACK)
       gfx.setStroke(piece_stroke())
-      gfx.draw(circle)
+      draw_shape(gfx, circle)
 
       # draw the text
       num_pips = tile.counter.num_pips
@@ -172,43 +178,43 @@ class RenderJob
       r = @scale * 0.03
       offset = -(xs.last - xs.first) / 2.0
       xs.each do |x|
-        gfx.fill(make_circle(r, x + offset, y))
+        fill_shape(gfx, make_circle(r, x + offset, y))
       end
     end
   end
 
   def draw_edge(edge, buffer)
     return unless edge.piece
-    path = RenderPaths::PIECES[edge.piece.type][edge.alignment]
-    path = scale_path(path, @scale)
+    shape = RenderShapes::PIECES[edge.piece.type][edge.alignment]
+    shape = scale_shape(shape, @scale)
     color = {red: Color::RED, blue: Color::BLUE, orange: Color::ORANGE,
       white: Color.new(220,220,220)}[edge.piece.player]
-    x, y = board_coords_to_window(edge.row, edge.col)
+    x, y = tile_coords_to_window(edge.row, edge.col, @scale)
     gfx = buffer.createGraphics
     gfx.setRenderingHint(RHint::KEY_ANTIALIASING, RHint::VALUE_ANTIALIAS_ON)
     gfx.translate(x, y)
     gfx.setPaint(color)
-    gfx.fill(path)
+    fill_shape(gfx, shape)
     gfx.setPaint(Color::BLACK)
     gfx.setStroke(piece_stroke())
-    gfx.draw(path)
+    draw_shape(gfx, shape)
   end
 
   def draw_vtex(vtex, buffer)
     return unless vtex.piece
-    path = RenderPaths::PIECES[vtex.piece.type][vtex.alignment]
-    path = scale_path(path, @scale)
+    shape = RenderShapes::PIECES[vtex.piece.type][vtex.alignment]
+    shape = scale_shape(shape, @scale)
     color = {red: Color::RED, blue: Color::BLUE, orange: Color::ORANGE,
       white: Color.new(220,220,220)}[vtex.piece.player]
-    x, y = board_coords_to_window(vtex.row, vtex.col)
+    x, y = tile_coords_to_window(vtex.row, vtex.col, @scale)
     gfx = buffer.createGraphics
     gfx.setRenderingHint(RHint::KEY_ANTIALIASING, RHint::VALUE_ANTIALIAS_ON)
     gfx.translate(x, y)
     gfx.setPaint(color)
-    gfx.fill(path)
+    fill_shape(gfx, shape)
     gfx.setPaint(Color::BLACK)
     gfx.setStroke(piece_stroke())
-    gfx.draw(path)
+    draw_shape(gfx, shape)
   end
 
   def draw_board()
@@ -218,6 +224,44 @@ class RenderJob
     @game.board.edges.each {|edge| draw_edge(edge, buffer) }
     @game.board.vtexs.each {|vtex| draw_vtex(vtex, buffer) }
     return buffer
+  end
+
+  def draw_highlight(shape, factor)
+    orig, path = *shape
+    path = path.clone
+    path.append(scale_path(path, factor), false)
+    path.setWindingRule(java.awt.geom.Path2D::WIND_EVEN_ODD)
+    path = scale_path(path, @scale)
+    shape = [orig, path]
+
+    # new_shape = scale_shape(shape, 0, factor)
+    # new_shape[1].append(shape[1], false)
+    # new_shape = scale_shape(new_shape, 0, @scale)
+
+    buffer = BufferedImage.new((BOARD_UNIT_X * 4 * @scale).to_i,
+                               (BOARD_UNIT_Y * 6 * @scale).to_i,
+                               BufferedImage::TYPE_4BYTE_ABGR)
+    gfx = buffer.createGraphics
+    gfx.setRenderingHint(RHint::KEY_ANTIALIASING, RHint::VALUE_ANTIALIAS_ON)
+    gfx.translate(buffer.getWidth() / 2.0, buffer.getHeight() / 2.0)
+    gfx.setColor(COL_HIGHLIGHT)
+    fill_shape(gfx, shape)
+    gfx.setStroke(detail_stroke())
+    gfx.setColor(Color::BLACK)
+    draw_shape(gfx, shape)
+    return buffer
+  end
+
+  def render()
+#    board = draw_board()
+#    htile = draw_highlight(RenderShapes::HEX, 1.05)
+#    return {board: board, highlight: {tile: htile}}
+    return {
+      board: draw_board(),
+      highlight: {
+        tile:  draw_highlight(RenderShapes::HEX, 1.1),
+      },
+    }
   end
 end
 
@@ -244,13 +288,12 @@ class Renderer
           this_job
         end
         if scale.nil?
-#        scale = @next_job
-#        if scale.nil?
           sleep(1.0)
         else
           job = RenderJob.new(@game, scale)
-          board = job.draw_board()
-          Event.emit(:render_job_done, board: board)
+          puts "Renderer: rendering job #{scale.inspect}"
+          buffers = job.render()
+          Event.emit(:render_job_done, buffers)
         end
       end
     end
@@ -281,13 +324,26 @@ class BoardWindow < javax.swing.JPanel
 
   def initialize()
     super
-    @board_buffer = nil
+    @bounds = nil
+    @scale = nil
+    @buffers = {}
+    @buffers_mutex = Mutex.new
     addComponentListener ComponentListener.new
   end
 
-  def board_buffer=(bb)
-    @board_buffer = bb
+  def set_buffers(buffers)
+    @buffers_mutex.synchronize do
+      @buffers = buffers
+    end
     repaint
+  end
+
+  def xy_to_bounds(x, y)
+    return [x + @bounds[0], y + @bounds[1]]
+  end
+
+  def xy_from_bounds(x, y)
+    return [x - @bounds[0], y - @bounds[1]]
   end
 
   def get_board_bounds()
@@ -308,19 +364,45 @@ class BoardWindow < javax.swing.JPanel
 
   def paintComponent(gfx)
     super
-    unless @board_buffer.nil?
-      x, y, w, h = get_board_bounds()
-      img = @board_buffer.getScaledInstance(w, h, java.awt.Image::SCALE_FAST)
-      gfx.drawImage(img, x, y, nil)
+    @buffers_mutex.synchronize do
+      if @buffers[:board]
+        x, y, w, h = @bounds
+        img = @buffers[:board].getScaledInstance(w, h, java.awt.Image::SCALE_FAST)
+        gfx.drawImage(img, x, y, nil)
+      end
+      x, y = xy_to_bounds(*tile_coords_to_window(2, 2, @scale))
+      draw_centered_image(gfx, @buffers[:highlight][:tile], x, y) if @buffers[:highlight]
     end
   end
 
   def on_resize()
-    x, y, w, h = get_board_bounds()
-    scale = (w.to_f / BOARD_UNITS_W)
-    Event.emit(:request_render_job, scale: scale)
+    @bounds = get_board_bounds()
+    @scale = (@bounds[2].to_f / BOARD_UNITS_W)
+    Event.emit(:request_render_job, scale: @scale)
   end
 
+  def window_coords_to_board(x, y)
+    x -= @bounds[0]
+    y -= @bounds[1]
+    i, yrem = y.divmod(BOARD_UNIT_Y * @scale)
+    j, xrem = x.divmod(BOARD_UNIT_X * @scale)
+    if i % 3 != 1
+      row = (i % 3 == 0) ? (i / 3) : (i / 3) + 1
+      ascending, above = nil, nil
+    else
+      ascending = (i % 6 == 1) ? (j % 2 == 1) : (j % 2 == 0)
+      if ascending
+        above = (BOARD_UNIT_Y * @scale - yrem) / xrem > BOARD_UNIT_Y / BOARD_UNIT_X
+      else
+        above = yrem / xrem < BOARD_UNIT_Y / BOARD_UNIT_X
+      end
+      #above = (ascending ? ((BOARD_UNIT_Y * @scale - yrem) / xrem > BOARD_UNIT_Y / BOARD_UNIT_X)
+      #above = ((ascending ? (BOARD_UNIT_Y * @scale) - yrem : yrem) / xrem) < (BOARD_UNIT_Y / BOARD_UNIT_X)
+      row = above ? (i / 3) : (i / 3) + 1
+    end
+    col = (j - 2 + row) / 2
+    [row, col, ascending, above]
+  end
 end
 
 
@@ -356,6 +438,8 @@ board_text = "
                      *           *           *
 "
 
+Thread.abort_on_exception = true
+
 game = Game.new
 
 b = Board.new
@@ -376,8 +460,9 @@ bwindow = BoardWindow.new
 
 f.add bwindow
 f.setDefaultCloseOperation javax.swing.WindowConstants::DISPOSE_ON_CLOSE
+#f.setDefaultCloseOperation javax.swing.JFrame::EXIT_ON_CLOSE
 f.pack
-f.setSize 800, 800
+f.setSize 600, 600
 
 renderer = Renderer.new(game)
 
@@ -387,14 +472,16 @@ renderer.start_thread
 Event.connect(:request_render_job) do |name, data|
   renderer.add_render_job(data[:scale])
 end
-Event.connect(:render_job_done) do |name, data|
-  bwindow.board_buffer = data[:board]
+Event.connect(:render_job_done) do |name, buffers|
+  bwindow.set_buffers(buffers)
 end
 
 class MainFrameListener < java.awt.event.WindowAdapter
   def windowClosed
+    puts "MainFrameListener: window closed"
     renderer.stop_thread()
     Event.stop_thread()
+    puts "MainFrameListener: threads stopped"
   end
 end
 f.addWindowListener MainFrameListener.new
