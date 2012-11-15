@@ -1,9 +1,14 @@
 require 'thread'
 
+require_relative '../common/coordinates'
 require_relative '../common/event'
 require_relative '../common/frontier'
+require_relative '../common/player'
 require_relative '../common/util'
 require_relative 'render_shapes'
+require_relative 'client'
+
+include Coords
 
 include Java
 
@@ -41,14 +46,20 @@ def draw_centered_text(gfx, text, font, x, y, center_y = true)
                       (center_y ? (y - bounds.getCenterY()) : y))
 end
 
+def draw_text(gfx, text, font, x, y, args)
+  frc = gfx.getFontRenderContext()
+  glyph_vector = font.createGlyphVector(frc, text)
+  bounds = glyph_vector.getVisualBounds()
+  x -= bounds.getCenterX() if args[:center_x]
+  y -= bounds.getCenterY() if args[:center_y]
+  gfx.setColor(args[:color]) if args[:color]
+  y += font.getLineMetrics(text, frc).getHeight * args[:line] if args[:line]
+  gfx.drawGlyphVector(glyph_vector, x, y)
+end
+
 def draw_centered_image(gfx, img, x, y)
   w, h = img.getWidth(), img.getHeight()
   gfx.drawImage(img, x - w/2, y - h/2, nil)
-end
-
-def tile_coords_to_window(row, col, scale=1.0)
-  [((2 * col - row + 3) * BOARD_UNIT_X * scale).to_i,
-   ((3 * row) * BOARD_UNIT_Y * scale).to_i]
 end
 
 def draw_shape(gfx, shape)
@@ -65,51 +76,13 @@ def fill_shape(gfx, shape)
   gfx.translate(-o.x, -o.y)
 end
 
-# :.....:.....:.....:.....:.....:.....:.....:.....:.....:.....:.....:.....:
-# :     :     :     :     :     :     :     :     :     :     :     :     :
-# :.....:.....:.....:.....X.....:.....X.....:.....X.....:.....:.....:.....:
-# :     :     :     :  X  :  X  :  X  :  X  :  X  :  X  :     :     :     :
-# :.....:.....:.....X.....:.....X.....:.....X.....:.....X.....:.....:.....:
-# :     :     :     X     :     X     :     X     :     X     :     :     :
-# :.....:.....:.....X.....:.....X.....:.....X.....:.....X.....:.....:.....:
-# :     :     :     X     :     X     :     X     :     X     :     :     :
-# :.....:.....:.....X.....:.....X.....:.....X.....:.....X.....:.....:.....:
-# :     :     :  X  :  X  :  X  :  X  :  X  :  X  :  X  :  X  :     :     :
-# :.....:.....X.....:.....X.....:.....X.....:.....X.....:.....X.....:.....:
-# :     :     X     :     X     :     X     :     X     :     X     :     :
-# :.....:.....X.....:.....X.....:.....X.....:.....X.....:.....X.....:.....:
-# :     :     X     :     X     :     X     :     X     :     X     :     :
-# :.....:.....X.....:.....X.....:.....X.....:.....X.....:.....X.....:.....:
-# :     :  X  :  X  :  X  :  X  :  X  :  X  :  X  :  X  :  X  :  X  :     :
-# :.....X.....:.....X.....:.....X.....:.....X.....:.....X.....:.....X.....:
-# :     X     :     X     :     X     :     X     :     X     :     X     :
-# :.....X.....:.....X.....:.....X.....:.....X.....:.....X.....:.....X.....:
-# :     X     :     X     :     X     :     X     :     X     :     X     :
-# :.....X.....:.....X.....:.....X.....:.....X.....:.....X.....:.....X.....:
-# :     :  X  :  X  :  X  :  X  :  X  :  X  :  X  :  X  :  X  :  X  :     :
-# :.....:.....X.....:.....X.....:.....X.....:.....X.....:.....X.....:.....:
-# :     :     X     :     X     :     X     :     X     :     X     :     :
-# :.....:.....X.....:.....X.....:.....X.....:.....X.....:.....X.....:.....:
-# :     :     X     :     X     :     X     :     X     :     X     :     :
-# :.....:.....X.....:.....X.....:.....X.....:.....X.....:.....X.....:.....:
-# :     :     :  X  :  X  :  X  :  X  :  X  :  X  :  X  :  X  :     :     :
-# :.....:.....:.....X.....:.....X.....:.....X.....:.....X.....:.....:.....:
-# :     :     :     X     :     X     :     X     :     X     :     :     :
-# :.....:.....:.....X.....:.....X.....:.....X.....:.....X.....:.....:.....:
-# :     :     :     X     :     X     :     X     :     X     :     :     :
-# :.....:.....:.....X.....:.....X.....:.....X.....:.....X.....:.....:.....:
-# :     :     :     :  X  :  X  :  X  :  X  :  X  :  X  :     :     :     :
-# :.....:.....:.....:.....X.....:.....X.....:.....X.....:.....:.....:.....:
-# :     :     :     :     :     :     :     :     :     :     :     :     :
-# :.....:.....:.....:.....:.....:.....:.....:.....:.....:.....:.....:.....:
-BOARD_UNIT_X = RenderShapes::HR3
-BOARD_UNIT_Y = 0.5
-BOARD_UNITS_W = BOARD_UNIT_X * 12
-BOARD_UNITS_H = BOARD_UNIT_Y * 18
-BOARD_WH_RATIO = BOARD_UNITS_W / BOARD_UNITS_H
-
 DETAIL_LINE_WEIGHT = 1.0 / 200.0
 PIECE_LINE_WEIGHT = 1.0 / 75.0
+
+REPAINT_BLOCK_X = -(SECTOR_W + 0.5)
+REPAINT_BLOCK_Y = -(SECTOR_H * 2 + 0.5)
+REPAINT_BLOCK_W = SECTOR_W * 2 + 1.0
+REPAINT_BLOCK_H = SECTOR_H * 4 + 1.0
 
 class Terrain
   attr_accessor :color
@@ -126,10 +99,9 @@ COL_SEA        = Color.new( 40,  70,  160 )
 COL_HIGHLIGHT  = Color.new( 180, 250, 210 )
 
 ################################################################################
-# RenderJob
+# BoardRenderJob
 ################################################################################
-
-class RenderJob
+class BoardRenderJob
   attr_accessor :game, :scale
   def initialize(game, scale)
     @game = game
@@ -144,7 +116,7 @@ class RenderJob
   def draw_tile(tile, buffer)
     outer_hex = scale_shape(RenderShapes::HEX, @scale * 0.97)
     inner_hex = scale_shape(RenderShapes::HEX, @scale * 0.87)
-    x, y = tile_coords_to_window(tile.row, tile.col, @scale)
+    x, y = tile_coords_to_render(tile.coords, @scale)
     gfx = buffer.createGraphics
     gfx.setRenderingHint(RHint::KEY_ANTIALIASING, RHint::VALUE_ANTIALIAS_ON)
     gfx.translate(x, y)
@@ -189,7 +161,7 @@ class RenderJob
     shape = scale_shape(shape, @scale)
     color = {red: Color::RED, blue: Color::BLUE, orange: Color::ORANGE,
       white: Color.new(220,220,220)}[edge.piece.player]
-    x, y = tile_coords_to_window(edge.row, edge.col, @scale)
+    x, y = tile_coords_to_render([edge.row, edge.col], @scale)
     gfx = buffer.createGraphics
     gfx.setRenderingHint(RHint::KEY_ANTIALIASING, RHint::VALUE_ANTIALIAS_ON)
     gfx.translate(x, y)
@@ -206,7 +178,7 @@ class RenderJob
     shape = scale_shape(shape, @scale)
     color = {red: Color::RED, blue: Color::BLUE, orange: Color::ORANGE,
       white: Color.new(220,220,220)}[vtex.piece.player]
-    x, y = tile_coords_to_window(vtex.row, vtex.col, @scale)
+    x, y = tile_coords_to_render([vtex.row, vtex.col], @scale)
     gfx = buffer.createGraphics
     gfx.setRenderingHint(RHint::KEY_ANTIALIASING, RHint::VALUE_ANTIALIAS_ON)
     gfx.translate(x, y)
@@ -218,7 +190,7 @@ class RenderJob
   end
 
   def draw_board()
-    w, h = BOARD_UNITS_W * @scale, BOARD_UNITS_H * @scale
+    w, h = BOARD_W * @scale, BOARD_H * @scale
     buffer = BufferedImage.new(w, h, BufferedImage::TYPE_4BYTE_ABGR)
     @game.board.tiles.each {|tile| draw_tile(tile, buffer) }
     @game.board.edges.each {|edge| draw_edge(edge, buffer) }
@@ -234,12 +206,8 @@ class RenderJob
     path = scale_path(path, @scale)
     shape = [orig, path]
 
-    # new_shape = scale_shape(shape, 0, factor)
-    # new_shape[1].append(shape[1], false)
-    # new_shape = scale_shape(new_shape, 0, @scale)
-
-    buffer = BufferedImage.new((BOARD_UNIT_X * 4 * @scale).to_i,
-                               (BOARD_UNIT_Y * 6 * @scale).to_i,
+    buffer = BufferedImage.new((SECTOR_W * 4 * @scale).to_i,
+                               (SECTOR_H * 6 * @scale).to_i,
                                BufferedImage::TYPE_4BYTE_ABGR)
     gfx = buffer.createGraphics
     gfx.setRenderingHint(RHint::KEY_ANTIALIASING, RHint::VALUE_ANTIALIAS_ON)
@@ -253,22 +221,52 @@ class RenderJob
   end
 
   def render()
-#    board = draw_board()
-#    htile = draw_highlight(RenderShapes::HEX, 1.05)
-#    return {board: board, highlight: {tile: htile}}
     return {
       board: draw_board(),
       highlight: {
         tile:  draw_highlight(RenderShapes::HEX, 1.1),
       },
+#      hand: HandRenderJob.new($player, @scale).render
     }
+  end
+end
+
+################################################################################
+# HandRenderJob
+################################################################################
+class HandRenderJob
+  def initialize(player, scale)
+    @player = player
+    @scale = scale
+  end
+
+  def render_resources()
+    num_resources = @player.resources.cards.count
+
+    w = (scale * 12).to_i
+    h = (scale * 2).to_i
+    border = 3
+
+    buffer = BufferedImage.new(w, h * num_resources, BufferedImage::TYPE_BYTE_ABGR)
+    gfx = buffer.createGraphics
+    @player.resources.cards.each_with_index do |card, i|
+      gfx.setColor(card.terrain.color)
+      gfx.fillRect(0, h * i, w, h)
+      gfx.setColor(Color::WHITE)
+      gfx.fillRect(border, h * i + border, w - border * 2, h - border * 2)
+    end
+
+    return buffer
+  end
+
+  def render()
+    return render_resources
   end
 end
 
 ################################################################################
 # Renderer
 ################################################################################
-
 class Renderer
   def initialize(game)
     @game = game
@@ -290,8 +288,7 @@ class Renderer
         if scale.nil?
           sleep(1.0)
         else
-          job = RenderJob.new(@game, scale)
-          puts "Renderer: rendering job #{scale.inspect}"
+          job = BoardRenderJob.new(@game, scale)
           buffers = job.render()
           Event.emit(:render_job_done, buffers)
         end
@@ -313,8 +310,8 @@ end
 ################################################################################
 # BoardWindow
 ################################################################################
-
 class BoardWindow < javax.swing.JPanel
+  attr_accessor :client
 
   class ComponentListener < java.awt.event.ComponentAdapter
     def componentResized(evt)
@@ -322,20 +319,54 @@ class BoardWindow < javax.swing.JPanel
     end
   end
 
+  class MouseListener < java.awt.event.MouseAdapter
+#    def mouseClicked(evt)
+#      results = evt.source.point_to_tile_coords(evt.getX, evt.getY)
+#      puts "#{results.inspect}"
+#    end
+    def mouseMoved(evt)
+      evt.source.on_mouse_moved(evt.getX, evt.getY)
+    end
+  end
+
   def initialize()
     super
+    @client = nil
     @bounds = nil
     @scale = nil
     @buffers = {}
     @buffers_mutex = Mutex.new
+    @highlight_type = nil
+    @highlight_coords = nil
+    @highlight_mutex = Mutex.new
     addComponentListener ComponentListener.new
+    addMouseListener MouseListener.new
+    addMouseMotionListener MouseListener.new
   end
 
   def set_buffers(buffers)
-    @buffers_mutex.synchronize do
-      @buffers = buffers
-    end
+    @buffers_mutex.synchronize { @buffers = buffers }
     repaint
+  end
+
+  def repaint_block(coords)
+    row, col, alignment = coords
+    x, y = board_coords_to_component(*tile_coords_to_board([row, col]))
+    repaint(0,
+            (x + REPAINT_BLOCK_X * @scale).to_i,
+            (y + REPAINT_BLOCK_Y * @scale).to_i,
+            (REPAINT_BLOCK_W * @scale).to_i,
+            (REPAINT_BLOCK_H * @scale).to_i)
+  end
+
+  def set_highlight(type, coords)
+    old_coords = @highlight_mutex.synchronize do
+      old_coords = @highlight_coords
+      @highlight_type, @highlight_coords = type, coords
+      old_coords
+    end
+    repaint_block(old_coords) unless old_coords.nil?
+    repaint_block(coords) unless coords.nil?
   end
 
   def xy_to_bounds(x, y)
@@ -344,6 +375,16 @@ class BoardWindow < javax.swing.JPanel
 
   def xy_from_bounds(x, y)
     return [x - @bounds[0], y - @bounds[1]]
+  end
+
+  def component_coords_to_board(x, y)
+    return [(x - @bounds[0]) / @scale,
+            (y - @bounds[1]) / @scale]
+  end
+
+  def board_coords_to_component(x, y)
+    return [(x * @scale + @bounds[0]).to_i,
+            (y * @scale + @bounds[1]).to_i]
   end
 
   def get_board_bounds()
@@ -370,49 +411,62 @@ class BoardWindow < javax.swing.JPanel
         img = @buffers[:board].getScaledInstance(w, h, java.awt.Image::SCALE_FAST)
         gfx.drawImage(img, x, y, nil)
       end
-      x, y = xy_to_bounds(*tile_coords_to_window(2, 2, @scale))
-      draw_centered_image(gfx, @buffers[:highlight][:tile], x, y) if @buffers[:highlight]
+
+      @highlight_mutex.synchronize do
+        if @highlight_coords and @buffers[:highlight]
+          x, y = xy_to_bounds(*tile_coords_to_render(@highlight_coords, @scale))
+          draw_centered_image(gfx, @buffers[:highlight][@highlight_type], x, y)
+#          gfx.setStroke(BasicStroke.new(3))
+#          gfx.drawRect((x + REPAINT_BLOCK_X * @scale).to_i,
+#                       (y + REPAINT_BLOCK_Y * @scale).to_i,
+#                       (REPAINT_BLOCK_W * @scale).to_i,
+#                       (REPAINT_BLOCK_H * @scale).to_i)
+        end
+      end
     end
   end
 
   def on_resize()
     @bounds = get_board_bounds()
-    @scale = (@bounds[2].to_f / BOARD_UNITS_W)
+    @scale = (@bounds[2].to_f / BOARD_W)
     Event.emit(:request_render_job, scale: @scale)
   end
 
-  def window_coords_to_board(x, y)
-    x -= @bounds[0]
-    y -= @bounds[1]
-    i, yrem = y.divmod(BOARD_UNIT_Y * @scale)
-    j, xrem = x.divmod(BOARD_UNIT_X * @scale)
-    if i % 3 != 1
-      row = (i % 3 == 0) ? (i / 3) : (i / 3) + 1
-      ascending, above = nil, nil
-    else
-      ascending = (i % 6 == 1) ? (j % 2 == 1) : (j % 2 == 0)
-      if ascending
-        above = (BOARD_UNIT_Y * @scale - yrem) / xrem > BOARD_UNIT_Y / BOARD_UNIT_X
-      else
-        above = yrem / xrem < BOARD_UNIT_Y / BOARD_UNIT_X
-      end
-      #above = (ascending ? ((BOARD_UNIT_Y * @scale - yrem) / xrem > BOARD_UNIT_Y / BOARD_UNIT_X)
-      #above = ((ascending ? (BOARD_UNIT_Y * @scale) - yrem : yrem) / xrem) < (BOARD_UNIT_Y / BOARD_UNIT_X)
-      row = above ? (i / 3) : (i / 3) + 1
-    end
-    col = (j - 2 + row) / 2
-    [row, col, ascending, above]
+  def on_mouse_moved(mx, my)
+    coords = tile_coords_under_point(*component_coords_to_board(mx, my))
+    coords = nil unless @client.game.board.tile_map.has_key?(coords)
+    old_coords = @highlight_mutex.synchronize { @highlight_coords }
+    set_highlight(:tile, coords) if coords != old_coords
   end
 end
 
 
+class PlayerWindow < javax.swing.JPanel
+  attr_accessor :client
+
+  def initialize()
+    @client = nil
+  end
+
+  def paintComponent(gfx)
+    super
+    setBackground Color::WHITE
+    cards = @client.local_player.resources
+    font = Font.new("SansSerif", Font::BOLD, 14)
+    cards.each_with_index do |resource, i|
+      draw_text(gfx, resource.name, font, 20, 30,
+                color: resource.terrain.color,
+                line: i)
+    end
+  end
+end
 
 
 
 require_relative '../common/board'
 require_relative '../common/game'
 
-board_text = "
+$board_text = "
                      *           *           *
                   *     *     *     *     *     *
                *           Rs          *           *
@@ -438,43 +492,31 @@ board_text = "
                      *           *           *
 "
 
-Thread.abort_on_exception = true
-
-game = Game.new
-
-b = Board.new
-b.create_spaces
-b.connect_spaces
-b.load_text(board_text)
-game.board = b
-
-# r = Renderer.new
-# r.game = game
-# r.scale = 80
-
-f = javax.swing.JFrame.new("Test Frame")
-
-#img = r.draw_buffer
-bwindow = BoardWindow.new
-#bwindow.board_buffer = img
-
-f.add bwindow
-f.setDefaultCloseOperation javax.swing.WindowConstants::DISPOSE_ON_CLOSE
-#f.setDefaultCloseOperation javax.swing.JFrame::EXIT_ON_CLOSE
-f.pack
-f.setSize 600, 600
-
-renderer = Renderer.new(game)
-
-Event.start_thread
-renderer.start_thread
-
-Event.connect(:request_render_job) do |name, data|
-  renderer.add_render_job(data[:scale])
-end
-Event.connect(:render_job_done) do |name, buffers|
-  bwindow.set_buffers(buffers)
-end
+# board_text = "
+#                      *           *           *
+#                   *     R     *     *     *     *
+#                *           *           *           *
+#                *     p     R     f     *     d     *
+#                *           *           *           *
+#             *     *     R     *     *     *     *     *
+#          *           Rc          *           *           *
+#          *     m     *     a     *     m     *     a     *
+#          *           *           *           *           *
+#       *     *     *     *     *     *     *     *     *     *
+#    *           *           *           *           Rs          *
+#    *     h     *     p11   *     p8    *     h5    *     m2    *
+#    *           *           *           *           *           *
+#       *     *     *     *     *     *     *     *     *     *
+#          *           *           *           *           *
+#          *     a     *     f     *     p     *     a     *
+#          *           *           *           *           *
+#             *     *     *     *     *     *     *     *
+#                *           *           *           *
+#                *     h     *     f     *     f     *
+#                *           *           *           *
+#                   *     *     *     *     *     *
+#                      *           *           *
+# "
 
 class MainFrameListener < java.awt.event.WindowAdapter
   def windowClosed
@@ -484,6 +526,89 @@ class MainFrameListener < java.awt.event.WindowAdapter
     puts "MainFrameListener: threads stopped"
   end
 end
-f.addWindowListener MainFrameListener.new
 
-f.setVisible true
+class TestFrame < javax.swing.JFrame
+  def initialize
+    super
+
+    ############################################################################
+    # client setup
+
+    @client = Client.new
+
+    game = Game.new
+    @client.game = game
+
+    b = Board.new
+    b.create_spaces
+    b.connect_spaces
+    b.load_text($board_text)
+    game.board = b
+
+    # puts "################################################################################"
+    # puts game.board.inspect
+    # puts "################################################################################"
+
+    game.players = {
+      red: Player.new(color: :red),
+      blue: Player.new(color: :blue),
+      orange: Player.new(color: :orange),
+      white: Player.new(color: :white),
+    }
+
+    local_player = game.players[:red]
+    @client.local_player = local_player
+    local_player.resources = [LUMBER, GRAIN, WOOL, ORE, BRICK]
+
+    ############################################################################
+    # layout setup
+
+    cp = getContentPane()
+
+    layout = javax.swing.BoxLayout.new(cp, javax.swing.BoxLayout::X_AXIS)
+    cp.setLayout layout
+
+    @player_window = PlayerWindow.new
+    @player_window.setMinimumSize   dim(200, 10)
+    @player_window.setPreferredSize dim(200, 100)
+    @player_window.setMaximumSize   dim(200, 10000)
+    cp.add @player_window
+
+    @board_window = BoardWindow.new
+    @board_window.setMinimumSize    dim(200, 10)
+    @board_window.setPreferredSize  dim(400, 100)
+    @board_window.setMaximumSize    dim(1000, 10000)
+    cp.add @board_window
+
+    @player_window.client = @client
+    @board_window.client = @client
+
+#    setDefaultCloseOperation javax.swing.WindowConstants::DISPOSE_ON_CLOSE
+    setDefaultCloseOperation javax.swing.JFrame::EXIT_ON_CLOSE
+    setSize 1000, 800
+    setLocation 400, 100
+    setVisible true
+  end
+
+  def run
+
+    renderer = Renderer.new(@client.game)
+
+    Thread.abort_on_exception = true
+
+    Event.start_thread
+    renderer.start_thread
+
+    Event.connect(:request_render_job) do |name, data|
+      renderer.add_render_job(data[:scale])
+    end
+    Event.connect(:render_job_done) do |name, buffers|
+      @board_window.set_buffers(buffers)
+    end
+
+    addWindowListener MainFrameListener.new
+
+  end
+end
+
+TestFrame.new().run()

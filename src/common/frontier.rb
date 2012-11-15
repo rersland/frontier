@@ -1,7 +1,7 @@
 require_relative 'util'
 
 class Resource
-  attr_accessor :name
+  attr_accessor :name, :terrain
 
   def initialize(attributes)
     set_attributes(attributes)
@@ -9,10 +9,11 @@ class Resource
 end
 
 class Terrain
-  attr_accessor :name, :text_symbol
+  attr_accessor :name, :text_symbol, :resource
 
   def initialize(attributes)
     set_attributes(attributes)
+    resource.terrain = self unless resource.nil?
   end
 
   def inspect()
@@ -50,16 +51,23 @@ end
 
 
 
-WOOD  = Resource.new(name: "wood")
-WHEAT = Resource.new(name: "wheat")
-CLAY  = Resource.new(name: "clay")
-ROCK  = Resource.new(name: "rock")
-SHEEP = Resource.new(name: "sheep")
+LUMBER = Resource.new(name: "lumber")
+GRAIN  = Resource.new(name: "grain")
+BRICK  = Resource.new(name: "brick")
+ORE    = Resource.new(name: "ore")
+WOOL   = Resource.new(name: "wool")
 
-FOREST   = Terrain.new(name: "forest",   text_symbol: "f")
-PLAINS   = Terrain.new(name: "plains",   text_symbol: "p")
-PASTURE  = Terrain.new(name: "pasture",  text_symbol: "a")
-HILLS    = Terrain.new(name: "hills",    text_symbol: "h")
-MOUNTAIN = Terrain.new(name: "mountain", text_symbol: "m")
+FOREST   = Terrain.new(name: "forest",   text_symbol: "f", resource: LUMBER)
+PLAINS   = Terrain.new(name: "plains",   text_symbol: "p", resource: GRAIN)
+PASTURE  = Terrain.new(name: "pasture",  text_symbol: "a", resource: WOOL)
+HILLS    = Terrain.new(name: "hills",    text_symbol: "h", resource: BRICK)
+MOUNTAIN = Terrain.new(name: "mountain", text_symbol: "m", resource: ORE)
 DESERT   = Terrain.new(name: "desert",   text_symbol: "d")
 TERRAINS = [FOREST, PLAINS, HILLS, MOUNTAIN, PASTURE, DESERT]
+
+class ResourceHand
+  attr_accessor :cards
+  def initialize(cards=nil)
+    @cards = cards || []
+  end
+end

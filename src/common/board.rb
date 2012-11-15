@@ -68,6 +68,10 @@ class Tile
                 nil)
     @robber = (text =~ /&/) ? true : false
   end
+
+  def coords()
+    return [@row, @col]
+  end
 end
 
 class Vtex
@@ -92,6 +96,10 @@ class Vtex
              GamePiece.new({'s'=>:settlement, 'c'=>:city}[m[2]],
                            {'R'=>:red, 'B'=>:blue, 'W'=>:white, 'O'=>:orange}[m[1]]) :
              nil)
+  end
+
+  def coords()
+    return [@row, @col, @alignment]
   end
 end
 
@@ -119,6 +127,10 @@ class Edge
               GamePiece.new(:road, {'R'=>:red, 'B'=>:blue, 'W'=>:white, 'O'=>:orange}[m[1]]) :
               nil)
   end
+
+  def coords()
+    return [@row, @col, @alignment]
+  end
 end
 
 class Board
@@ -131,19 +143,22 @@ class Board
               :desc_edges, :desc_edge_map,
               :vert_edges, :vert_edge_map)
 
-  # access the tile at (row, col)
-  def tile(row, col)
-    tile_map[[row, col]]
+  # access the tile at row, col
+  # coords - row, col OR [row, col]
+  def tile(*coords)
+    (coords.size == 1) ? tile_map[coords.first] : tile_map[coords]
   end
 
   # access the edge at (row, col) with alignment :asc, :desc, or :vert
-  def edge(alignment, row, col)
-    edge_map[[alignment, row, col]]
+  # coords - row, col, alignment OR [row, col, alignment]
+  def edge(*coords)
+    (coords.size == 1) ? edge_map[coords.first] : edge_map[coords]
   end
 
   # access the :up or :down vertex at (row, col)
-  def vtex(alignment, row, col)
-    vtex_map[[alignment, row, col]]
+  # coords - row, col, alignment OR [row, col, alignment]
+  def vtex(*coords)
+    (coords.size == 1) ? vtex_map[coords.first] : vtex_map[coords]
   end
 
   # create the Tile, Edge, Vtex objects that compose the map
@@ -175,8 +190,8 @@ class Board
     @edges = @asc_edges + @desc_edges + @vert_edges
     @all_spaces = @tiles + @vtexs + @edges
 
-    @vtex_map = Hash[@vtexs.map {|v| [[v.alignment, v.row, v.col], v]}]
-    @edge_map = Hash[@edges.map {|e| [[e.alignment, e.row, e.col], e]}]
+    @vtex_map = Hash[@vtexs.map {|v| [v.coords, v]}]
+    @edge_map = Hash[@edges.map {|e| [e.coords, e]}]
 
     @all_spaces.zip((0...(@all_spaces.length)).to_a).each do |obj, id|
       obj.id = id
@@ -191,12 +206,12 @@ class Board
       r, c = tile.row, tile.col
 
       # link the tile with its 6 neighboring tiles
-      [[[r-1, c-1], :nw, :se],
-       [[r-1, c  ], :ne, :sw],
-       [[r  , c+1], :e , :w ],
-       [[r+1, c+1], :se, :nw],
-       [[r+1, c  ], :sw, :ne],
-       [[r  , c-1], :w , :e ]
+      [[[ r-1 , c-1 ], :nw, :se],
+       [[ r-1 , c   ], :ne, :sw],
+       [[ r   , c+1 ], :e , :w ],
+       [[ r+1 , c+1 ], :se, :nw],
+       [[ r+1 , c   ], :sw, :ne],
+       [[ r   , c-1 ], :w , :e ],
       ].each do |coords, dir1, dir2|
         other = @tile_map[coords]
         tile.set_tile(dir1, other)
@@ -204,12 +219,12 @@ class Board
       end
 
       # link the tile with its 6 neighboring vertexes
-      [[[:down, r-1, c-1], :nw, :se],
-       [[:up  , r  , c  ], :n , :s ],
-       [[:down, r-1, c  ], :ne, :sw],
-       [[:up  , r+1, c+1], :se, :nw],
-       [[:down, r  , c  ], :s , :n ],
-       [[:up  , r+1, c  ], :sw, :ne]
+      [[[ r-1 , c-1 , :down ], :nw, :se],
+       [[ r   , c   , :up   ], :n , :s ],
+       [[ r-1 , c   , :down ], :ne, :sw],
+       [[ r+1 , c+1 , :up   ], :se, :nw],
+       [[ r   , c   , :down ], :s , :n ],
+       [[ r+1 , c   , :up   ], :sw, :ne],
       ].each do |coords, dir1, dir2|
         vtex = @vtex_map[coords]
         tile.set_vtex(dir1, vtex)
@@ -217,12 +232,12 @@ class Board
       end
 
       # link the tile with its 6 neighboring edges
-      [[[:vert, r  , c  ], :w , :e ],
-       [[:asc , r  , c  ], :nw, :se],
-       [[:desc, r  , c  ], :ne, :sw],
-       [[:vert, r  , c+1], :e , :w ],
-       [[:asc , r+1, c+1], :se, :nw],
-       [[:desc, r+1, c  ], :sw, :ne]
+      [[[ r   , c   , :vert ], :w , :e ],
+       [[ r   , c   , :asc  ], :nw, :se],
+       [[ r   , c   , :desc ], :ne, :sw],
+       [[ r   , c+1 , :vert ], :e , :w ],
+       [[ r+1 , c+1 , :asc  ], :se, :nw],
+       [[ r+1 , c   , :desc ], :sw, :ne],
       ].each do |coords, dir1, dir2|
         edge = @edge_map[coords]
         tile.set_edge(dir1, edge)
@@ -233,9 +248,9 @@ class Board
     # link the :up vertexes with neighboring edges
     @up_vtexs.each do |vtex|
       r, c = vtex.row, vtex.col
-      [[[:vert, r-1, c  ], :n , :s ],
-       [[:desc, r  , c  ], :se, :nw],
-       [[:asc , r  , c  ], :sw, :ne]
+      [[[ r-1 , c   , :vert ], :n , :s ],
+       [[ r   , c   , :asc  ], :sw, :ne],
+       [[ r   , c   , :desc ], :se, :nw],
       ].each do |coords, dir1, dir2|
         edge = @edge_map[coords]
         vtex.set_edge(dir1, edge)
@@ -246,9 +261,9 @@ class Board
     # link the :down vertexes with neighboring edges
     @down_vtexs.each do |vtex|
       r, c = vtex.row, vtex.col
-      [[[:desc, r+1, c  ], :nw, :se],
-       [[:asc , r+1, c+1], :ne, :sw],
-       [[:vert, r+1, c+1], :s , :n ]
+      [[[ r+1 , c+1 , :vert ], :s , :n ],
+       [[ r+1 , c+1 , :asc  ], :ne, :sw],
+       [[ r+1 , c   , :desc ], :nw, :se],
       ].each do |coords, dir1, dir2|
         edge = @edge_map[coords]
         vtex.set_edge(dir1, edge)
