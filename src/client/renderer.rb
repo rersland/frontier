@@ -1,19 +1,18 @@
 require 'thread'
 
+require_relative 'client'
+require_relative 'constants'
+require_relative 'gui'
+require_relative 'render_shapes'
 require_relative '../common/coordinates'
 require_relative '../common/event'
 require_relative '../common/frontier'
 require_relative '../common/player'
 require_relative '../common/util'
-require_relative 'render_shapes'
-require_relative 'gui_utils'
-require_relative 'client'
 
 include Coords
-
+include Gui
 include Java
-
-include JavaAliases
 
 def scale_path(path, scale)
   xform = AffineTransform.new
@@ -42,22 +41,6 @@ def draw_centered_text(gfx, text, font, x, y, center_y = true)
                       (center_y ? (y - bounds.getCenterY()) : y))
 end
 
-def draw_text(gfx, text, font, x, y, args)
-  frc = gfx.getFontRenderContext()
-  glyph_vector = font.createGlyphVector(frc, text)
-  bounds = glyph_vector.getVisualBounds()
-  x -= bounds.getCenterX() if args[:center_x]
-  y -= bounds.getCenterY() if args[:center_y]
-  gfx.setColor(args[:color]) if args[:color]
-  y += font.getLineMetrics(text, frc).getHeight * args[:line] if args[:line]
-  gfx.drawGlyphVector(glyph_vector, x, y)
-end
-
-def draw_centered_image(gfx, img, x, y)
-  w, h = img.getWidth(), img.getHeight()
-  gfx.drawImage(img, x - w/2, y - h/2, nil)
-end
-
 def draw_shape(gfx, shape)
   o, path = *shape
   gfx.translate(o.x, o.y)
@@ -79,23 +62,6 @@ REPAINT_BLOCK_X = -(SECTOR_W + 0.5)
 REPAINT_BLOCK_Y = -(SECTOR_H * 2 + 0.5)
 REPAINT_BLOCK_W = SECTOR_W * 2 + 1.0
 REPAINT_BLOCK_H = SECTOR_H * 4 + 1.0
-
-class Terrain
-  attr_accessor :color
-end
-FOREST.color    = Color.new(  40, 155,   0 )
-PLAINS.color    = Color.new( 240, 210,  90 )
-HILLS.color     = Color.new( 220,  90,  50 )
-MOUNTAIN.color  = Color.new( 160, 120,  70 )
-PASTURE.color   = Color.new( 170, 240,  70 )
-DESERT.color    = Color.new( 250, 250,  80 )
-
-COL_CREAM       = Color.new( 230, 220, 150 )
-COL_SEA         = Color.new(  40,  70, 160 )
-COL_HIGHLIGHT   = Color.new( 180, 250, 210 )
-
-COL_CARD_BORDER = Color::BLACK
-COL_CARD_BG     = Color.new( 192, 192, 192 )
 
 ################################################################################
 # BoardRenderJob
@@ -130,7 +96,7 @@ class BoardRenderJob
     gfx.translate(x, y)
     gfx.setPaint(COL_CREAM)
     fill_shape(gfx, outer_hex)
-    gfx.setPaint(tile.terrain.color)
+    gfx.setPaint(tile.terrain.palette.primary)
     fill_shape(gfx, inner_hex)
     gfx.setPaint(Color::BLACK)
     gfx.setStroke(detail_stroke())
@@ -259,7 +225,7 @@ class HandRenderJob
     buffer = BufferedImage.new(w, h * num_resources, BufferedImage::TYPE_BYTE_ABGR)
     gfx = buffer.createGraphics
     @player.resources.cards.each_with_index do |card, i|
-      gfx.setColor(card.terrain.color)
+      gfx.setColor(card.terrain.palette.primary)
       gfx.fillRect(0, h * i, w, h)
       gfx.setColor(Color::WHITE)
       gfx.fillRect(border, h * i + border, w - border * 2, h - border * 2)
@@ -315,311 +281,3 @@ class Renderer
     @thread.wakeup if @thread.status == 'sleep'
   end
 end
-
-################################################################################
-# BoardWindow
-################################################################################
-class BoardWindow < javax.swing.JPanel
-  attr_accessor :client
-
-  class ComponentListener < java.awt.event.ComponentAdapter
-    def componentResized(evt)
-      evt.source.on_resize
-    end
-  end
-
-  class MouseListener < java.awt.event.MouseAdapter
-#    def mouseClicked(evt)
-#      results = evt.source.point_to_tile_coords(evt.getX, evt.getY)
-#      puts "#{results.inspect}"
-#    end
-    def mouseMoved(evt)
-      evt.source.on_mouse_moved(evt.getX, evt.getY)
-    end
-  end
-
-  def initialize()
-    super
-    @client = nil
-    @bounds = nil
-    @scale = nil
-    @buffers = {}
-    @buffers_mutex = Mutex.new
-    @highlight_type = nil
-    @highlight_coords = nil
-    @highlight_mutex = Mutex.new
-    addComponentListener ComponentListener.new
-    addMouseListener MouseListener.new
-    addMouseMotionListener MouseListener.new
-  end
-
-  def set_buffers(buffers)
-    @buffers_mutex.synchronize { @buffers = buffers }
-    repaint
-  end
-
-  def repaint_block(coords)
-    row, col, alignment = coords
-    x, y = board_coords_to_component(*tile_coords_to_board([row, col]))
-    repaint(0,
-            (x + REPAINT_BLOCK_X * @scale).to_i,
-            (y + REPAINT_BLOCK_Y * @scale).to_i,
-            (REPAINT_BLOCK_W * @scale).to_i,
-            (REPAINT_BLOCK_H * @scale).to_i)
-  end
-
-  def set_highlight(type, coords)
-    old_coords = @highlight_mutex.synchronize do
-      old_coords = @highlight_coords
-      @highlight_type, @highlight_coords = type, coords
-      old_coords
-    end
-    repaint_block(old_coords) unless old_coords.nil?
-    repaint_block(coords) unless coords.nil?
-  end
-
-  def xy_to_bounds(x, y)
-    return [x + @bounds[0], y + @bounds[1]]
-  end
-
-  def xy_from_bounds(x, y)
-    return [x - @bounds[0], y - @bounds[1]]
-  end
-
-  def component_coords_to_board(x, y)
-    return [(x - @bounds[0]) / @scale,
-            (y - @bounds[1]) / @scale]
-  end
-
-  def board_coords_to_component(x, y)
-    return [(x * @scale + @bounds[0]).to_i,
-            (y * @scale + @bounds[1]).to_i]
-  end
-
-  def get_board_bounds()
-    if (getWidth().to_f / getHeight().to_f > BOARD_WH_RATIO)
-      w = (BOARD_WH_RATIO * getHeight()).to_i
-      h = getHeight()
-      x = (getWidth() - w) / 2
-      y = 0
-      return [x, y, w, h]
-    else
-      w = getWidth()
-      h = (getWidth() / BOARD_WH_RATIO).to_i
-      x = 0
-      y = (getHeight() - h) / 2
-      return [x, y, w, h]
-    end
-  end
-
-  def paintComponent(gfx)
-    super
-    setBackground COL_SEA
-    @buffers_mutex.synchronize do
-      if @buffers[:board]
-        x, y, w, h = @bounds
-        img = @buffers[:board].getScaledInstance(w, h, java.awt.Image::SCALE_FAST)
-        gfx.drawImage(img, x, y, nil)
-      end
-
-      @highlight_mutex.synchronize do
-        if @highlight_coords and @buffers[:highlight]
-          x, y = xy_to_bounds(*tile_coords_to_render(@highlight_coords, @scale))
-          draw_centered_image(gfx, @buffers[:highlight][@highlight_type], x, y)
-#          gfx.setStroke(BasicStroke.new(3))
-#          gfx.drawRect((x + REPAINT_BLOCK_X * @scale).to_i,
-#                       (y + REPAINT_BLOCK_Y * @scale).to_i,
-#                       (REPAINT_BLOCK_W * @scale).to_i,
-#                       (REPAINT_BLOCK_H * @scale).to_i)
-        end
-      end
-    end
-  end
-
-  def on_resize()
-    @bounds = get_board_bounds()
-    @scale = (@bounds[2].to_f / BOARD_W)
-    Event.emit(:request_render_job, scale: @scale)
-  end
-
-  def on_mouse_moved(mx, my)
-    coords = tile_coords_under_point(*component_coords_to_board(mx, my))
-    coords = nil unless @client.game.board.tile_map.has_key?(coords)
-    old_coords = @highlight_mutex.synchronize { @highlight_coords }
-    set_highlight(:tile, coords) if coords != old_coords
-  end
-end
-
-################################################################################
-# CardView
-################################################################################
-class CardView < javax.swing.JPanel
-  def initialize(card)
-    super()
-    @card = card
-    setMinimumSize   dim(100, 50)
-    setPreferredSize dim(200, 50)
-    setMaximumSize   dim(200, 50)
-    add_margins([4, 4, 4, 4])
-  end
-
-  def paintComponent(gfx)
-    super
-
-    gfx.setRenderingHint(RHint::KEY_ANTIALIASING, RHint::VALUE_ANTIALIAS_ON)
-    gfx.setColor COL_CARD_BORDER
-    x, y, w, h = *get_inset_bounds()
-    gfx.fillRoundRect(x, y, w, h, 10, 10)
-    gfx.setColor @card.terrain.color
-    gfx.fillRect(x+4, y+4, w-8, h-8)
-
-    font = Font.new("SansSerif", Font::BOLD, 14)
-    x = self.getWidth() / 2
-    y = self.getHeight() / 2
-    draw_text(gfx, @card.name, font, x, y, color: Color::BLACK,
-              center_x: true, center_y: true)
-  end
-end
-
-################################################################################
-# PlayerWindow
-################################################################################
-class PlayerWindow < javax.swing.JPanel
-  attr_accessor :client
-
-  def initialize()
-    super
-    @client = nil
-    setLayout javax.swing.BoxLayout.new(self, javax.swing.BoxLayout::Y_AXIS)
-  end
-
-  def setCards(cards)
-    removeAll
-    cards.each do |card|
-      add CardView.new(card)
-    end
-  end
-end
-
-
-
-require_relative '../common/board'
-require_relative '../common/game'
-
-$board_text = "
-                     *           *           *
-                  *     *     *     *     *     *
-               *           Rs          *           *
-               *     p     R     f     *     d     *
-               *           *           Bs          *
-            *     *     *     R     B     *     *     *
-         *           *           *           *           *
-         *     m     *     a     R     m     *     a     *
-         *           *           *           Os          *
-      *     *     *     R     R     R     *     O     *     *
-   *           Ws          Rc          *           *           *
-   *     h     W     p11   R     p8    *     h5    O     m2    *
-   *           *           *           Os          Os          *
-      *     O     W     B     B     *     O     O     *     *
-         Os          *           *           *           *
-         *     a     W     f     B     p     W     a     *
-         *           *           *           *           *
-            *     W     *     *     B     *     W     *
-               Ws          *           Bs          Ws
-               *     h     R     f     *     f     *
-               *           Rs          *           *
-                  *     *     *     *     *     *
-                     *           *           *
-"
-
-class MainFrameListener < java.awt.event.WindowAdapter
-  def windowClosed
-    puts "MainFrameListener: window closed"
-    renderer.stop_thread()
-    Event.stop_thread()
-    puts "MainFrameListener: threads stopped"
-  end
-end
-
-class TestFrame < javax.swing.JFrame
-  def initialize
-    super
-
-    ############################################################################
-    # client setup
-
-    @client = Client.new
-
-    game = Game.new
-    @client.game = game
-
-    b = Board.new
-    b.create_spaces
-    b.connect_spaces
-    b.load_text($board_text)
-    game.board = b
-
-    game.players = {
-      red: Player.new(color: :red),
-      blue: Player.new(color: :blue),
-      orange: Player.new(color: :orange),
-      white: Player.new(color: :white),
-    }
-
-    local_player = game.players[:red]
-    @client.local_player = local_player
-    local_player.resource_cards = [LUMBER, GRAIN, WOOL, ORE, BRICK]
-
-    ############################################################################
-    # layout setup
-
-    cp = getContentPane()
-
-    layout = javax.swing.BoxLayout.new(cp, javax.swing.BoxLayout::X_AXIS)
-    cp.setLayout layout
-
-    @player_window = PlayerWindow.new
-    @player_window.setMinimumSize   dim(200, 10)
-    @player_window.setPreferredSize dim(200, 100)
-    @player_window.setMaximumSize   dim(200, 10000)
-    cp.add @player_window
-
-    @board_window = BoardWindow.new
-    @board_window.setMinimumSize    dim(200, 10)
-    @board_window.setPreferredSize  dim(400, 100)
-    @board_window.setMaximumSize    dim(10000, 10000)
-    cp.add @board_window
-
-    @player_window.client = @client
-    @player_window.setCards(local_player.resource_cards)
-    @board_window.client = @client
-
-    setDefaultCloseOperation javax.swing.JFrame::EXIT_ON_CLOSE
-    setSize 600, 400
-    setLocation 400, 100
-    setTitle "Frontier"
-    setVisible true
-  end
-
-  def run
-
-    renderer = Renderer.new(@client.game)
-
-    Thread.abort_on_exception = true
-
-    Event.start_thread
-    renderer.start_thread
-
-    Event.connect(:request_render_job) do |name, data|
-      renderer.add_render_job(data[:scale])
-    end
-    Event.connect(:render_job_done) do |name, buffers|
-      @board_window.set_buffers(buffers)
-    end
-
-    addWindowListener MainFrameListener.new
-
-  end
-end
-
-TestFrame.new().run()
