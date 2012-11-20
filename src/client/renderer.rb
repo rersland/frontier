@@ -6,18 +6,14 @@ require_relative '../common/frontier'
 require_relative '../common/player'
 require_relative '../common/util'
 require_relative 'render_shapes'
+require_relative 'gui_utils'
 require_relative 'client'
 
 include Coords
 
 include Java
 
-BufferedImage = java.awt.image.BufferedImage
-AffineTransform = java.awt.geom.AffineTransform
-BasicStroke = java.awt.BasicStroke
-Color = java.awt.Color
-Font = java.awt.Font
-RHint = java.awt.RenderingHints
+include JavaAliases
 
 def scale_path(path, scale)
   xform = AffineTransform.new
@@ -87,16 +83,19 @@ REPAINT_BLOCK_H = SECTOR_H * 4 + 1.0
 class Terrain
   attr_accessor :color
 end
-FOREST.color   = Color.new( 40,  155, 0   )
-PLAINS.color   = Color.new( 240, 210, 90  )
-HILLS.color    = Color.new( 220, 90,  50  )
-MOUNTAIN.color = Color.new( 160, 120, 70  )
-PASTURE.color  = Color.new( 170, 240, 70  )
-DESERT.color   = Color.new( 250, 250, 80  )
+FOREST.color    = Color.new(  40, 155,   0 )
+PLAINS.color    = Color.new( 240, 210,  90 )
+HILLS.color     = Color.new( 220,  90,  50 )
+MOUNTAIN.color  = Color.new( 160, 120,  70 )
+PASTURE.color   = Color.new( 170, 240,  70 )
+DESERT.color    = Color.new( 250, 250,  80 )
 
-COL_CREAM      = Color.new( 230, 220, 150 )
-COL_SEA        = Color.new( 40,  70,  160 )
-COL_HIGHLIGHT  = Color.new( 180, 250, 210 )
+COL_CREAM       = Color.new( 230, 220, 150 )
+COL_SEA         = Color.new(  40,  70, 160 )
+COL_HIGHLIGHT   = Color.new( 180, 250, 210 )
+
+COL_CARD_BORDER = Color::BLACK
+COL_CARD_BG     = Color.new( 192, 192, 192 )
 
 ################################################################################
 # BoardRenderJob
@@ -112,6 +111,15 @@ class BoardRenderJob
   def piece_stroke()   BasicStroke.new(@scale * PIECE_LINE_WEIGHT)   end
   def counter_number_font()  Font.new("Serif", Font::BOLD, (@scale * 0.32).to_i)   end
   def counter_letter_font()  Font.new("SansSerif", Font::PLAIN, (@scale * 0.15).to_i)  end
+
+  def draw_board_foundation(buffer)
+    path = scale_path(RenderShapes::PIECES[:board_foundation], @scale)
+    x, y = tile_coords_to_render([3, 3], @scale)
+    gfx = buffer.createGraphics
+    gfx.setRenderingHint(RHint::KEY_ANTIALIASING, RHint::VALUE_ANTIALIAS_ON)
+    gfx.setPaint(Color::WHITE)
+    fill_shape(gfx, [vec(0,0,), path])
+  end
 
   def draw_tile(tile, buffer)
     outer_hex = scale_shape(RenderShapes::HEX, @scale * 0.97)
@@ -192,6 +200,7 @@ class BoardRenderJob
   def draw_board()
     w, h = BOARD_W * @scale, BOARD_H * @scale
     buffer = BufferedImage.new(w, h, BufferedImage::TYPE_4BYTE_ABGR)
+    draw_board_foundation(buffer)
     @game.board.tiles.each {|tile| draw_tile(tile, buffer) }
     @game.board.edges.each {|edge| draw_edge(edge, buffer) }
     @game.board.vtexs.each {|vtex| draw_vtex(vtex, buffer) }
@@ -405,6 +414,7 @@ class BoardWindow < javax.swing.JPanel
 
   def paintComponent(gfx)
     super
+    setBackground COL_SEA
     @buffers_mutex.synchronize do
       if @buffers[:board]
         x, y, w, h = @bounds
@@ -440,23 +450,53 @@ class BoardWindow < javax.swing.JPanel
   end
 end
 
-
-class PlayerWindow < javax.swing.JPanel
-  attr_accessor :client
-
-  def initialize()
-    @client = nil
+################################################################################
+# CardView
+################################################################################
+class CardView < javax.swing.JPanel
+  def initialize(card)
+    super()
+    @card = card
+    setMinimumSize   dim(100, 50)
+    setPreferredSize dim(200, 50)
+    setMaximumSize   dim(200, 50)
+    add_margins([4, 4, 4, 4])
   end
 
   def paintComponent(gfx)
     super
-    setBackground Color::WHITE
-    cards = @client.local_player.resources
+
+    gfx.setRenderingHint(RHint::KEY_ANTIALIASING, RHint::VALUE_ANTIALIAS_ON)
+    gfx.setColor COL_CARD_BORDER
+    x, y, w, h = *get_inset_bounds()
+    gfx.fillRoundRect(x, y, w, h, 10, 10)
+    gfx.setColor @card.terrain.color
+    gfx.fillRect(x+4, y+4, w-8, h-8)
+
     font = Font.new("SansSerif", Font::BOLD, 14)
-    cards.each_with_index do |resource, i|
-      draw_text(gfx, resource.name, font, 20, 30,
-                color: resource.terrain.color,
-                line: i)
+    x = self.getWidth() / 2
+    y = self.getHeight() / 2
+    draw_text(gfx, @card.name, font, x, y, color: Color::BLACK,
+              center_x: true, center_y: true)
+  end
+end
+
+################################################################################
+# PlayerWindow
+################################################################################
+class PlayerWindow < javax.swing.JPanel
+  attr_accessor :client
+
+  def initialize()
+    super
+    @client = nil
+    setLayout javax.swing.BoxLayout.new(self, javax.swing.BoxLayout::Y_AXIS)
+  end
+
+  def setCards(cards)
+    removeAll
+    cards.each do |card|
+      add CardView.new(card)
     end
   end
 end
@@ -492,32 +532,6 @@ $board_text = "
                      *           *           *
 "
 
-# board_text = "
-#                      *           *           *
-#                   *     R     *     *     *     *
-#                *           *           *           *
-#                *     p     R     f     *     d     *
-#                *           *           *           *
-#             *     *     R     *     *     *     *     *
-#          *           Rc          *           *           *
-#          *     m     *     a     *     m     *     a     *
-#          *           *           *           *           *
-#       *     *     *     *     *     *     *     *     *     *
-#    *           *           *           *           Rs          *
-#    *     h     *     p11   *     p8    *     h5    *     m2    *
-#    *           *           *           *           *           *
-#       *     *     *     *     *     *     *     *     *     *
-#          *           *           *           *           *
-#          *     a     *     f     *     p     *     a     *
-#          *           *           *           *           *
-#             *     *     *     *     *     *     *     *
-#                *           *           *           *
-#                *     h     *     f     *     f     *
-#                *           *           *           *
-#                   *     *     *     *     *     *
-#                      *           *           *
-# "
-
 class MainFrameListener < java.awt.event.WindowAdapter
   def windowClosed
     puts "MainFrameListener: window closed"
@@ -545,10 +559,6 @@ class TestFrame < javax.swing.JFrame
     b.load_text($board_text)
     game.board = b
 
-    # puts "################################################################################"
-    # puts game.board.inspect
-    # puts "################################################################################"
-
     game.players = {
       red: Player.new(color: :red),
       blue: Player.new(color: :blue),
@@ -558,7 +568,7 @@ class TestFrame < javax.swing.JFrame
 
     local_player = game.players[:red]
     @client.local_player = local_player
-    local_player.resources = [LUMBER, GRAIN, WOOL, ORE, BRICK]
+    local_player.resource_cards = [LUMBER, GRAIN, WOOL, ORE, BRICK]
 
     ############################################################################
     # layout setup
@@ -577,16 +587,17 @@ class TestFrame < javax.swing.JFrame
     @board_window = BoardWindow.new
     @board_window.setMinimumSize    dim(200, 10)
     @board_window.setPreferredSize  dim(400, 100)
-    @board_window.setMaximumSize    dim(1000, 10000)
+    @board_window.setMaximumSize    dim(10000, 10000)
     cp.add @board_window
 
     @player_window.client = @client
+    @player_window.setCards(local_player.resource_cards)
     @board_window.client = @client
 
-#    setDefaultCloseOperation javax.swing.WindowConstants::DISPOSE_ON_CLOSE
     setDefaultCloseOperation javax.swing.JFrame::EXIT_ON_CLOSE
-    setSize 1000, 800
+    setSize 600, 400
     setLocation 400, 100
+    setTitle "Frontier"
     setVisible true
   end
 

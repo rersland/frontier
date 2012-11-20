@@ -49,6 +49,12 @@ class GamePiece
   end
 end
 
+class DevelopmentCard
+  attr_accessor :name
+  def initialize(attributes)
+    set_attributes(attributes)
+  end
+end
 
 
 LUMBER = Resource.new(name: "lumber")
@@ -65,7 +71,20 @@ MOUNTAIN = Terrain.new(name: "mountain", text_symbol: "m", resource: ORE)
 DESERT   = Terrain.new(name: "desert",   text_symbol: "d")
 TERRAINS = [FOREST, PLAINS, HILLS, MOUNTAIN, PASTURE, DESERT]
 
-class ResourceHand
+CARD_KNIGHT         = DevelopmentCard.new(name: "knight")
+CARD_VICTORY_POINT  = DevelopmentCard.new(name: "victory point")
+CARD_MONOPOLY       = DevelopmentCard.new(name: "monopoly")
+CARD_YEAR_OF_PLENTY = DevelopmentCard.new(name: "year of plenty")
+CARD_ROAD_BUILDING  = DevelopmentCard.new(name: "road building")
+
+class ResourceCards
+  attr_accessor :cards
+  def initialize(cards=nil)
+    @cards = cards || []
+  end
+end
+
+class DevelopmentCards
   attr_accessor :cards
   def initialize(cards=nil)
     @cards = cards || []

@@ -1,8 +1,12 @@
 require_relative '../common/util'
+require_relative '../common/coordinates'
 
 module RenderShapes
 
   include Java
+
+  #  include Coords
+  extend Coords
 
   def self.make_path(*points)
     path = java.awt.geom.Path2D::Double.new
@@ -58,6 +62,20 @@ module RenderShapes
                      vec(-2*x,    0))
   end
 
+  points = [[v300, [2,0,:down], [3,1,:up],   [1,0,:down], [2,1,:up],   [0,0,:down]],
+            [v0,   [1,1,:up],   [0,1,:down], [1,2,:up],   [0,2,:down], [1,3,:up]],
+            [v60,  [0,3,:down], [2,4,:up],   [1,4,:down], [3,5,:up],   [2,5,:down]],
+            [v120, [4,6,:up],   [3,5,:down], [5,6,:up],   [4,5,:down], [6,6,:up]],
+            [v180, [5,5,:down], [6,5,:up],   [5,4,:down], [6,4,:up],   [5,3,:down]],
+            [v240, [6,3,:up],   [4,2,:down], [5,2,:up],   [3,1,:down], [4,1,:up]],
+           ]
+  points.map! do |offset, *vtexs|
+    vtexs.map! {|coordinates| Vector.new(*tile_coords_to_board(coordinates))}
+    vtexs.map {|vec| vec + offset * 0.05}
+  end
+  points.flatten!(1)
+  board_foundation_path = make_path(*points)
+
   PIECES = {
     road: {
       asc:  [lerp(v300,   v0, 0.5), make_road_path(v240 * 0.5,  v60 * 0.5, v330, v150)],
@@ -71,7 +89,8 @@ module RenderShapes
     city: {
       up:   [  v0, make_city_path()],
       down: [v180, make_city_path()],
-    }
+    },
+    board_foundation: board_foundation_path,
   }
 
 end
